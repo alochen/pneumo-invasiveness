@@ -18,6 +18,14 @@ library(purrr)
 library(readxl)
 library(reshape)
 library(DescTools)
+library(gmp)
+library(lemon)
+
+# upload output files
+# abs.child <- read.csv("abs.child-new.csv")
+# abs.adult <- read.csv("abs.adult-new.csv")
+# consol.child <- read.csv("consol.child-new.csv")
+# consol.adult <- read.csv("consol.adult-new.csv")
 
 infant <- read.csv("Q:/Technical/R/Case-to-carrier/pneumo_invasiveness_inf.csv")
 adult <- read.csv("Q:/Technical/R/Case-to-carrier/pneumo_invasiveness_adu.csv")
@@ -79,6 +87,7 @@ new.adult$agegrp <- rep("adults", nrow(new.adult))
 tot.ds <- dplyr::bind_rows(new.infant, new.adult)
 tot.ds <- tot.ds[,c(6,2,5,1,3,4)] # rearrange columns into following order: age group, dataset, serogroup, serotype, carriage, disease
 tot.ds$Serotype <- as.character(tot.ds$Serotype)
+#tot.ds <- tot.ds[which(tot.ds$Serotype != "NT")] # remove NT
 
 #### Make population dataframe with study time interval, n.swab, population numbers ------------------------------------------------------------------------
 # sources of population numbers available upon request #
@@ -111,6 +120,7 @@ population.data <- data.frame(DS, n.swab, N.children, N.adults, time.int)
 ## Data cleaning for children carriage vs children disease
 
 child_only <- population.data %>% filter(!is.na(N.children)) %>% dplyr::select(-4) # keep only popln data for which children have data on n.swabs and N.children
+# write.csv(child_only, "children_DS_description.csv") # DESCRIPTION OF DATASETS
 colnames(child_only)[3] <- "N" # change column name of imported DF so it's easier to append population values onto main dataframe
 
 keepers <- paste(c(as.character(child_only$DS)), collapse = '|') # reformat dataset names that we are keeping 
@@ -195,8 +205,13 @@ invasiveness <- function(row_val) {
   #   {invas_dev <- rlnorm(n = num.dev, meanlog = inv_priors_df$log.inv.age1[which(inv_priors_df$st == serotype)]-log(1000), 
   #                     sdlog = 3*inv_priors_df$stddev[which(inv_priors_df$st == serotype)])
   # } else {invas_dev <- runif(n = num.dev, min = 0.00001, max = 0.5)}
+  if (serotype %in% c("1","46")) {
+    inv.max = 1
+  } else {
+    inv.max = 0.7
+  }
   
-  invas_dev <- runif(n = num.dev, min = 0.0000001, max = 0.5)
+  invas_dev <- runif(n = num.dev, min = 0.0000001, max = inv.max)
   
   # posterior distribution
   lambda <- carr_prev_dev*invas_dev*N*time.int
@@ -240,10 +255,10 @@ invasiveness <- function(row_val) {
   invas.high <- sum(bin.df$bins[which(invas_cp >= 0.975)[1]],bin.df$bins[which(invas_cp >= 0.975)[2]])/2
   
   # to plot vs weinberger distributions; and for model comparison
-  bin.df.new <- data.frame(bins = invas_dev, distrib = posterior_samp) # new bin.df
-  bin.df.new <- bin.df.new[order(bin.df.new$bins),]
+  #bin.df.new <- data.frame(bins = invas_dev, distrib = posterior_samp) # new bin.df
+  #bin.df.new <- bin.df.new[order(bin.df.new$bins),]
   df.name <- paste(DS, "distrib", agegroup, serotype, sep = ".")
-  assign(df.name, bin.df.new, envir = .GlobalEnv)
+  assign(df.name, bin.df, envir = .GlobalEnv) #bin.df.new
    
   
   # ####### the original way -----------------------------------------------------------------------------------------------------------------
@@ -323,7 +338,7 @@ calc_invas <- function(df) { # function that returns a single invasiveness with 
   #  prior_invas <- dlnorm(invas, meanlog = inv_priors_df$log.inv.age1[which(inv_priors_df$st == Serotype)]-log(1000), 
   #                               sdlog = inv_priors_df$stddev[which(inv_priors_df$st == Serotype)])
   #} else {
-    prior_invas <- dunif(invas, min = 0.00001, max = 0.5)
+  #  prior_invas <- dunif(invas, min = 0.00001, max = 0.5)
   #}
 
   posteriormarginal <- likelihood*prior_invas
@@ -341,16 +356,17 @@ calc_invas <- function(df) { # function that returns a single invasiveness with 
   #likelihooddf <- data.frame(invas = invas, likelihood = likelihood, distribution = "Our results")
   #weinbergerdf <- data.frame(invas = invas, likelihood = prior_invas*max(likelihood)/max(prior_invas), distribution = "Weinberger et al")
   #consol.df <- bind_rows(likelihooddf, weinbergerdf)
-  #ggplot(consol.df) + geom_line(aes(x = invas, y = likelihood, colour = distribution)) +
-  #  coord_cartesian(xlim = c(0,0.005)) + ggtitle(Serotype) + theme_classic() + labs(x = "Invasiveness", y = "Probability Density") + 
-  #  scale_y_continuous(labels = scales::scientific) + theme(legend.position = "none")
+  #plot <- ggplot(consol.df) + geom_line(aes(x = invas, y = likelihood, colour = distribution)) +
+  # coord_cartesian(xlim = c(0,0.1)) +
+  #  ggtitle(Serotype) + theme_classic() + labs(x = "Invasiveness", y = "Probability Density") +
+  # scale_y_continuous(labels = scales::scientific) + theme_classic() + theme(legend.position = "none")
   
   
   bin.df <- data.frame(bins = invas, distrib = likelihood)
   df.name <- paste(paste("sero", df$Serotype[1], sep = ""), "distrib", df$agegrp[1], sep = ".")
   assign(df.name, bin.df, envir = .GlobalEnv)
   
-  return(inv_row)
+  return(inv_row) #plot)
 }
 
 #### -------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -358,7 +374,6 @@ calc_invas <- function(df) { # function that returns a single invasiveness with 
 #### -------------------------------------------------------------------------------------------------------------------------------------------------------
 cols <- c("VT7" = "#70AD47", "VT10"= "#4472C4", "VT13" = "#ED7D31", "NVT" = "black")
 
-# comment out either [geom_boxplot()] OR [geom_point() + geom_errorbar()] depending on what you need to see
 plot.inv.allages.allDS <- function(sero) {
   VT7 <- c("4","6B","9V", "14", "18C", "19F", "23F")
   VT10 <- c("1","5","7F")
@@ -369,7 +384,7 @@ plot.inv.allages.allDS <- function(sero) {
             #sero$Serotype
   y.inv <- sero$invasiveness
   sero$Serogroup <- factor(sero$Serogroup, levels = c("VT7", "VT10", "VT13", "NVT"))
-  sero$agegrp <- factor(sero$agegrp, levels = c("children","adults"))
+  sero$agegrp <- factor(sero$agegrp, levels = c("children","adults"), labels = c("Children", "Adults"))
   # order x-axis DS by vaccination periods
   # comment out if x-axis is serotypes
   x.sero <- factor(x.sero, levels = c("Alabama.pre.PCV", "Atlanta.pre.PCV", "Bogota.pre.PCV","Caracas.pre.PCV","Czech.pre.PCV","E.W.pre.PCV","Finland.pre.PCV",
@@ -386,15 +401,15 @@ plot.inv.allages.allDS <- function(sero) {
                   width = 0.01) + 
     geom_point(aes(color = sero$Serogroup, shape = sero$agegrp, group = sero$agegrp), 
                size = 2, position = position_dodge(0.75)) +
-    labs(x =  "Dataset", #"Serotype", #
-         y = "Invasiveness", title = "Dataset-Specific Invasiveness", #"Serotype-specific invasiveness",#
-         color = "Vaccine Category", 
+    labs(x =  "Serotype", #"Dataset", #
+         y = "Invasiveness (disease cases per carrier per yr)", title = "Invasiveness by dataset", #"Study-specific invasiveness", #
+         color = "Serotype Category", 
          shape = "Age Group") +
     guides(color = guide_legend(order = 1), shape = guide_legend(order = 2)) + 
     scale_color_manual(values= cols) +
     scale_y_continuous(trans = 'log10') +
     theme_bw() + theme_light() +
-    theme(axis.text.x = element_text(angle = 30, hjust = 1)) # DS angle = 30; serotype angle = 45
+    theme(axis.text.x = element_text(angle = 30, hjust = 1)) # DS angle = 30; serotype angle = 45;  poster text size  25
 }
 
 plot.carr.allages.allDS <- function(sero) { # plots carriage prevalence
@@ -445,19 +460,24 @@ plot.dis.allages.allDS <- function(sero) { # plots all datasets' IPD incidence f
 plot.consol.inv <- function(sero) { # plots the overall/consolidated invasiveness of all serotypes in one graph
   x.sero <- sero$Serotype
   y.inv <- sero$overall.invasiveness
-  sero$agegrp <- factor(sero$agegrp, levels = c("children","adults"))
+  sero$agegrp <- factor(sero$agegrp, levels = c("children","adults"), labels = c("Children", "Adults"))
   sero$Serogroup <- factor(sero$Serogroup, levels = c("VT7", "VT10", "VT13","NVT"))
   
   ggplot(sero, aes(x = reorder(x.sero, -y.inv), y = y.inv)) +
     geom_errorbar(aes(ymin = sero$overall.invasiveness.low, ymax = sero$overall.invasiveness.high, group = sero$agegrp), 
-                  width = 0.01, position = position_dodge(0.75)) +
+                  width = 0.25, position = position_dodge(0.75)) + # width = 0.01 for paper; width = 0.025 for poster
     geom_point(aes(color = sero$Serogroup, shape = sero$agegrp, group = sero$agegrp), 
-               position = position_dodge(0.75), size = 2) +
-    labs(x = "Serotype", y = "Invasiveness", title = "Overall Invasiveness", color = "Vaccine Category", shape = "Age Group") +
+               position = position_dodge(0.75), size = 2) + # size = 2 for paper; size = 3 for poster
+    labs(x = "Serotype", y = "Invasiveness (disease cases per carriers per yr)", title = "Global Invasiveness", color = "Serotype Category", shape = "Age Group") +
     scale_color_manual(values= cols) +
     scale_y_continuous(trans = 'log10') +
-    theme_bw() + theme_light()
-}
+    theme_bw() + theme_light() + theme(axis.text.x = element_text(angle = 45, hjust = 1)) # theme(text = element_text(size = 30)) for poster
+} # pdf 5x10
+
+# # setwd("C:/Users/kmcraemc/Box/ITS Team/Phase II - AD/Projects/Peri-threshold research paper/Risk score")
+# tiff("posterfig1.tiff", height=480, width=2*480, units="px")
+# plot.consol.inv(consol.tot)
+# dev.off()
 
 plot.DS.overall <- function(sero, consolidated.inv) { # plots one DS invasiveness with overall/consolidated invasiveness
   
@@ -517,7 +537,7 @@ plot.DS.overall <- function(sero, consolidated.inv) { # plots one DS invasivenes
 #### Invasiveness Rates ------------------------------------------------------------------------------------------------------------------------------------
 #### -------------------------------------------------------------------------------------------------------------------------------------------------------
 #### -------------------------------------------------------------------------------------------------------------------------------------------------------
-##### Sero and DS specific invasiveness ---------
+##### Sero and DS specific invasiveness --------------------------------------------------------------------------------------------------------------------
 # Invasiveness for children only
 abs.child <- as.data.frame(t(sapply(1:nrow(child.abs.ds), function(x) invasiveness(child.abs.ds[x,]))))
 abs.child <- data.frame(map(abs.child, unlist))
@@ -545,20 +565,31 @@ plot.carr.allages.allDS(abs.child)
 # Absolute disease incidence for all DS 
 plot.dis.allages.allDS(abs.tot)
 
+childDS.incidence <- abs.child %>% group_by(DS) %>% nest()
+childDS.incidencenum <- unlist(lapply(childDS.incidence$data, function(x) (sum(x$disease)/x$N[1])*100000))
+child_overallincidence <- data.frame(childDS.incidence$DS, childDS.incidencenum)
+
+adultDS.incidence <- abs.adult %>% group_by(DS) %>% nest()
+adultDS.incidencenum <- unlist(lapply(adultDS.incidence$data, function(x) (sum(x$disease)/x$N[1])*100000))
+adult_overallincidence <- data.frame(adultDS.incidence$DS, adultDS.incidencenum)
+
 # Absolute invasiveness for all DS
 
 plot.inv.allages.allDS(abs.child)
 plot.inv.allages.allDS(abs.adult)
 plot.inv.allages.allDS(abs.tot) # pdf dim 4 x 16 for serotype ; pdf dim 4 x 20 for DS
 
-##### Consolidated serotype-specific invasiveness ----
+##### Consolidated serotype-specific invasiveness ----------------------------------------------------------------------------------------------------------
 # Consolidated invasiveness for children in pre-PCV time periods
 inv.child.consol <- data.frame(map(child.abs.ds, unlist)) %>% 
   filter(!DS %in% c("France.post.PCV7", "Barcelona.post.PCV7", "France.post.PCV13", "Bogota.post.PCV7", "Massachusetts.post.PCV7","Navajo.post.PCV7", 
                                                                              "Atlanta.post.PCV7")) %>% group_by(Serotype) %>% nest()
 nDS <- sapply(inv.child.consol$data, function(x) nrow(x)) # number of datasets for each serotype
+
 excl.sero <- inv.child.consol$Serotype[which(nDS == 1)] # serotypes with only 1 dataset to be excluded for analysis
 inv.child.consol <- data.frame(inv.child.consol %>% unnest() %>% filter(!Serotype %in% excl.sero))
+# eachglobalinvDS <- inv.child.consol %>% select(Serotype, DS)
+# write.csv(eachglobalinvDS, 'globalinv_eachDS_children.csv') # Table of which datasets included for each serotype global inv calculation
 unique.child.sero <- unique(inv.child.consol$Serotype)
 #unique.child.sero <- unique.child.sero[!unique.child.sero %in% c(sero.to.change.low, sero.to.change.high, sero.to.change.higher)]
 
@@ -592,6 +623,8 @@ write.csv(consol.child, file = "consol.child-new.csv")
 # Consolidated invasiveness for adults in pre-PCV time periods
 inv.adult.consol <- data.frame(map(adult.abs.ds, unlist)) %>% 
   filter(!DS %in% c("Navajo.post.PCV7")) %>% group_by(Serotype) %>% nest()
+#eachglobalinvDS_adu <- inv.adult.consol %>% select(Serotype, DS)
+#write.csv(eachglobalinvDS_adu, 'globalinv_eachDS_adults.csv')
 nDS.adult <- sapply(inv.adult.consol$data, function(x) nrow(x)) # number of datasets for each serotype
 excl.sero.adult <- inv.adult.consol$Serotype[which(nDS.adult == 1)] # serotypes with only 1 dataset to be excluded for analysis
 inv.adult.consol <- data.frame(inv.adult.consol %>% unnest() %>% filter(!Serotype %in% excl.sero.adult))
@@ -660,42 +693,48 @@ consol.child.post$Serogroup[is.na(consol.child.post$Serogroup)] <- "NVT"
 plot.consol.inv(consol.child.post) # pdf dim 5 x 15
 write.csv(consol.child.post, "consol.child.postPCV-priors.csv")
 
-#### Debugging: Weinberger's prior vs likelihood and posterior  --------------------------------------------------------------------------------------------
+#### Debugging: Weinberger's prior vs our likelihood and posterior  ----------------------------------------------------------------------------------------
 
-plot.serolikelihood <- function(df, serotype, agegroup) {
+plot.serolikelihood <- function(df, serotype, agegroup) { # function that plots the likelihood of dataset-specific and Weinberger's posterior 
+  
   serotype.df <- df %>% filter(Serotype == serotype)
   dfs <- unique(serotype.df$DS)
   eachdf1 <- lapply(dfs, function(x) get(paste(x, "distrib", agegroup, serotype, sep = ".")))
   eachdf2 <- bind_rows(eachdf1)
-  eachdf.max <- max(eachdf2$distrib)
-  eachdf.norm <- lapply(eachdf1, function(x) x$distrib*eachdf.max/max(x$distrib))
+  eachdf.new <- list()
   
   for (i in 1:length(eachdf1)) {
-    eachdf1[[i]]$distrib <- eachdf.norm[[i]]
+    newbinsdev <- seq(0, max(eachdf1[[i]]$bins), length.out = 500)
+    inv.cut <- cut(eachdf1[[i]]$bins, newbinsdev)
+    dist.sum <- tapply(eachdf1[[i]]$distrib, INDEX = inv.cut, FUN = sum)
+    dist.mean <- dist.sum/100000
+    dist.mean[is.na(dist.mean)] <- 0
+    eachdf.new[[i]] <- data.frame(invas_dev = newbinsdev[-length(newbinsdev)], distrib = dist.mean, DS = dfs[i])
   }
   
-  eachdf <- bind_rows(eachdf2)
+  eachdf <- bind_rows(eachdf.new)
   
   sero.invas.dev <- rlnorm(n = 560000, meanlog = inv_priors_df$log.inv.age1[which(inv_priors_df$st == serotype)]-log(1000), 
                            sdlog = inv_priors_df$stddev[which(inv_priors_df$st == serotype)])
   sero.prior <- dlnorm(sero.invas.dev, meanlog = inv_priors_df$log.inv.age1[which(inv_priors_df$st == serotype)]-log(1000), 
                          sdlog = inv_priors_df$stddev[which(inv_priors_df$st == serotype)])
-  sero.priordf <- data.frame(bins = sero.invas.dev, distrib = sero.prior*max(eachdf$distrib)/max(sero.prior), DS = "prior")
+  sero.priordf <- data.frame(invas_dev = sero.invas.dev, distrib = sero.prior*max(eachdf$distrib)/max(sero.prior), DS = "prior")
   eachdf <- rbind(eachdf, sero.priordf)
   eachdf$col <- "Our posterior"
   eachdf$col[which(eachdf$DS == "prior")] <- "Weinberger et al"
   
   ggplot() + 
-    geom_line(eachdf, mapping = aes(x = bins, y = distrib, colour = DS, alpha = factor(col))) + scale_alpha_discrete(range = c(0.3, 1)) +
-    scale_y_continuous(labels = scales::scientific) + coord_cartesian(xlim = c(0,0.01)) + ggtitle(paste("Serotype", serotype, df$agegrp, "invasiveness", sep = " ")) + 
+    geom_line(eachdf, mapping = aes(x = invas_dev, y = distrib, colour = DS, alpha = factor(col))) + scale_alpha_discrete(range = c(0.3, 1)) +
+    scale_y_continuous(labels = scales::scientific) + ggtitle(paste("Serotype", serotype, df$agegrp, "invasiveness", sep = " ")) + 
+    labs(x = "Invasiveness", y = "Probability Density") +
     theme_minimal() + theme(legend.position = "none")
 }
 
-## children single invasiveness##
+## children specific invasiveness##
 
-serotypes.with.priors <- unique(child.abs.ds$Serotype)[unique(child.abs.ds$Serotype) %in% inv_priors_df$st]
-eachsero <- lapply(serotypes.with.priors, function(x) plot.serolikelihood(df = abs.child, serotype = x, agegroup = "children"))
-likelihoodvsprior1 <- grid.arrange(eachsero[[1]], eachsero[[2]], eachsero[[3]], eachsero[[4]], eachsero[[5]], eachsero[[6]], eachsero[[7]], eachsero[[8]], 
+serotypes.with.priors <- unique(child.abs.ds$Serotype)[unique(child.abs.ds$Serotype) %in% inv_priors_df$st] # serotypes that are included in Weinberger's analysis
+eachsero <- lapply(serotypes.with.priors, function(x) plot.serolikelihood(df = abs.child2, serotype = x, agegroup = "children"))
+likelihoodvsprior1 <- grid.arrange(eachsero[[1]], eachsero[[2]], eachsero[[3]], eachsero[[4]], eachsero[[5]], eachsero[[6]], eachsero[[7]], eachsero[[8]],
                                   eachsero[[9]], eachsero[[10]], eachsero[[11]], eachsero[[12]], eachsero[[13]], eachsero[[14]], eachsero[[15]], eachsero[[16]],
                                   #
                                   # eachsero[[17]], eachsero[[18]], eachsero[[19]], eachsero[[20]], eachsero[[21]], eachsero[[22]], eachsero[[23]], eachsero[[24]],
@@ -708,13 +747,14 @@ likelihoodvsprior1 <- grid.arrange(eachsero[[1]], eachsero[[2]], eachsero[[3]], 
                                   # eachsero[[57]], eachsero[[58]], eachsero[[59]],
                                   nrow = 4) #pdf dim 8 x 18
 
-## adults single invasiveness##
+
+## adults specific invasiveness##
 
 serotypes.with.priors.adu <- unique(adult.abs.ds$Serotype)[unique(adult.abs.ds$Serotype) %in% inv_priors_df$st]
 eachsero.adu <- lapply(serotypes.with.priors.adu, function(x) plot.serolikelihood(df = abs.adult, serotype = x, agegroup = "adults"))
-likelihoodvsprior1.adu <- grid.arrange(#eachsero.adu[[1]], eachsero.adu[[2]], eachsero.adu[[3]], eachsero.adu[[4]], eachsero.adu[[5]], eachsero.adu[[6]], 
-                                       # eachsero.adu[[7]], eachsero.adu[[8]], eachsero.adu[[9]], eachsero.adu[[10]], eachsero.adu[[11]], eachsero.adu[[12]], 
-                                       # eachsero.adu[[13]], eachsero.adu[[14]], eachsero.adu[[15]], 
+likelihoodvsprior1.adu <- grid.arrange(eachsero.adu[[1]], eachsero.adu[[2]], eachsero.adu[[3]], eachsero.adu[[4]], eachsero.adu[[5]], eachsero.adu[[6]], 
+                                       eachsero.adu[[7]], eachsero.adu[[8]], eachsero.adu[[9]], eachsero.adu[[10]], eachsero.adu[[11]], eachsero.adu[[12]],
+                                       eachsero.adu[[13]], eachsero.adu[[14]], eachsero.adu[[15]],
                                        #
                                        # eachsero.adu[[16]], eachsero.adu[[17]], eachsero.adu[[18]], eachsero.adu[[19]], eachsero.adu[[20]], eachsero.adu[[21]],
                                        # eachsero.adu[[22]], eachsero.adu[[23]], eachsero.adu[[24]], eachsero.adu[[25]], eachsero.adu[[26]], eachsero.adu[[27]],
@@ -723,9 +763,9 @@ likelihoodvsprior1.adu <- grid.arrange(#eachsero.adu[[1]], eachsero.adu[[2]], ea
                                        # eachsero.adu[[29]], eachsero.adu[[30]], eachsero.adu[[31]], eachsero.adu[[32]], eachsero.adu[[33]], eachsero.adu[[34]],
                                        # eachsero.adu[[35]], eachsero.adu[[36]], eachsero.adu[[37]], eachsero.adu[[38]], eachsero.adu[[39]], eachsero.adu[[40]],
                                        # 
-                                       eachsero.adu[[41]], eachsero.adu[[42]], eachsero.adu[[43]], eachsero.adu[[44]], eachsero.adu[[45]], eachsero.adu[[46]],
-                                       eachsero.adu[[47]], eachsero.adu[[48]], eachsero.adu[[49]],
-                                       nrow = 4) #pdf dim 8 x 18
+                                       # eachsero.adu[[41]], eachsero.adu[[42]], eachsero.adu[[43]], eachsero.adu[[44]], eachsero.adu[[45]], eachsero.adu[[46]],
+                                       # eachsero.adu[[47]], eachsero.adu[[48]], eachsero.adu[[49]],
+                                       nrow = 3) #pdf dim 8 x 18
 
 
 ## children consolidated invasiveness ##
@@ -749,6 +789,15 @@ likelihoodvsprior1.child.consol <- grid.arrange(#consol.child.likelihoodpri[[1]]
                                                 consol.child.likelihoodpri[[36]], consol.child.likelihoodpri[[37]], consol.child.likelihoodpri[[38]],
                                                 consol.child.likelihoodpri[[39]],
                                                 legendgrob, nrow = 4) #pdf dim 7 x 10
+
+#### Supplementary material for paper
+# sero1consolidatedchildren <- calc_invas(inv.child.consol %>% filter(Serotype == "1")) + coord_cartesian(xlim = c(0,0.03))
+# sero7Fconsolidatedchildren <- calc_invas(inv.child.consol %>% filter(Serotype == "7F")) + coord_cartesian(xlim = c(0,0.005))
+# sero12Fconsolidatedchildren <- calc_invas(inv.child.consol %>% filter(Serotype == "12F")) + coord_cartesian(xlim = c(0,0.004))
+# 
+# supplementarymaterial <- grid.arrange(eachsero[[1]]+theme_classic()+theme(legend.position = "none"), eachsero[[31]]+theme_classic()+theme(legend.position = "none"), 
+#                                       eachsero[[14]]+theme_classic()+theme(legend.position = "none"), 
+#                                       sero1consolidatedchildren, sero7Fconsolidatedchildren, sero12Fconsolidatedchildren, nrow = 2) # 6 x 12
 
 ## adults consolidated invasiveness ##
 consol.adult.likelihoodpri <- lapply(unique.adult.sero, function(x) {calc_invas(inv.adult.consol %>% filter(Serotype == x))}) # plots
@@ -785,34 +834,43 @@ dev.off()
 
 plot.posteriors <- function(df, serotype, agegroup) {
   serotype.df <- df %>% filter(Serotype == serotype)
-  dfs <- unique(serotype.df$DS)
+  dfs <- unique(serotype.df$DS) # unique DS
   eachdf1 <- lapply(dfs, function(x) get(paste(x, "distrib", agegroup, serotype, sep = ".")))
   eachdf2 <- do.call(rbind, eachdf1) #bind_rows(eachdf1)
   eachdf.max <- max(eachdf2$distrib)
   eachdf.norm <- lapply(eachdf1, function(x) x$distrib*eachdf.max/max(x$distrib))
   
   for (i in 1:length(eachdf1)) {
-    eachdf1[[i]]$distrib <- eachdf.norm[[i]]
+    eachdf1[[i]]$distrib2 <- eachdf.norm[[i]]
+    eachdf1[[i]]$DS <- dfs[i]
   }
   
   eachdf <- bind_rows(eachdf2)
+  eachdf$DS <- str_replace_all(str_replace_all(eachdf$DS, "[.]", " "), " P", "-P")
   consol.distrib <- get(paste(paste("sero", serotype, sep = ""), "distrib", agegroup, sep = "."))
-  consol.distrib$DS <- "consol"
+  consol.distrib$DS <- "Global inv"
   consol.distrib$distrib <- consol.distrib$distrib*eachdf.max/max(consol.distrib$distrib)
   eachdf <- rbind(eachdf, consol.distrib)
-  eachdf$col <- "single"
-  eachdf$col[which(eachdf$DS == "consol")] <- "consol"
+  eachdf$col <- "Specific"
+  eachdf$col[which(eachdf$DS == "Global inv")] <- "Global"
+  
+  eachdf$DS <- fct_relevel(eachdf$DS, "Global inv", after = Inf)
 
   ggplot() + 
     geom_line(eachdf, mapping = aes(x = bins, y = distrib, colour = DS, alpha = factor(col))) + scale_alpha_discrete(range = c(1, 0.3)) +
     scale_y_continuous(labels = scales::scientific) + coord_cartesian(xlim = c(0,max(consol.distrib$bins)+0.01)) + 
-    ggtitle(paste("Serotype", serotype, df$agegrp, "invasiveness", sep = " ")) + 
-    theme_minimal() + theme(legend.position = "none")
+    ggtitle(paste("Serotype", serotype, df$agegrp, "model comparison", sep = " ")) + 
+    labs(x = "Invasiveness (cases per carrier yr)", y = "Posterior PDF", alpha = "Model", colour = "Dataset") +
+    guides(colour = guide_legend(order = 1), alpha = guide_legend(order = 2))+
+    theme_minimal() 
 }
 
-consolvssingle.plots <- lapply(unique.child.sero, function(x) {plot.posteriors(df = inv.child.consol, serotype = x, agegroup = "children")})
-consol.vs.single <- grid.arrange(#consolvssingle.plots[[1]], consolvssingle.plots[[2]], consolvssingle.plots[[3]], consolvssingle.plots[[4]], consolvssingle.plots[[5]],
-                                 #consolvssingle.plots[[6]], consolvssingle.plots[[7]], consolvssingle.plots[[8]], consolvssingle.plots[[9]], consolvssingle.plots[[10]],
+presentation_serotypes <- c('1', '3', '4', '5', '7F', '14')
+consolvssingle.plots <- lapply(presentation_serotypes, function(x) {plot.posteriors(df = inv.child.consol, serotype = x, agegroup = "children")}) # unique.child.sero
+consol.vs.single <- grid.arrange(#consolvssingle.plots[[1]], consolvssingle.plots[[2]], 
+  #consolvssingle.plots[[3]], consolvssingle.plots[[4]], 
+  consolvssingle.plots[[5]],consolvssingle.plots[[6]], 
+  #consolvssingle.plots[[7]], consolvssingle.plots[[8]], consolvssingle.plots[[9]], consolvssingle.plots[[10]],
                                  
                                  # consolvssingle.plots[[11]], consolvssingle.plots[[12]], consolvssingle.plots[[13]], consolvssingle.plots[[14]], consolvssingle.plots[[15]],
                                  # consolvssingle.plots[[16]], consolvssingle.plots[[17]], consolvssingle.plots[[18]], consolvssingle.plots[[19]], consolvssingle.plots[[20]],
@@ -820,10 +878,10 @@ consol.vs.single <- grid.arrange(#consolvssingle.plots[[1]], consolvssingle.plot
                                  # consolvssingle.plots[[21]], consolvssingle.plots[[22]], consolvssingle.plots[[23]], consolvssingle.plots[[24]], consolvssingle.plots[[25]],
                                  # consolvssingle.plots[[26]], consolvssingle.plots[[27]], consolvssingle.plots[[28]], consolvssingle.plots[[29]], consolvssingle.plots[[30]],
                                  # 
-                                 consolvssingle.plots[[31]], consolvssingle.plots[[32]], consolvssingle.plots[[33]], consolvssingle.plots[[34]], consolvssingle.plots[[35]],
-                                 consolvssingle.plots[[36]], consolvssingle.plots[[37]], consolvssingle.plots[[38]], consolvssingle.plots[[39]],
+                                 #consolvssingle.plots[[31]], consolvssingle.plots[[32]], consolvssingle.plots[[33]], consolvssingle.plots[[34]], consolvssingle.plots[[35]],
+                                 #consolvssingle.plots[[36]], consolvssingle.plots[[37]], consolvssingle.plots[[38]], consolvssingle.plots[[39]],
                                  
-                                 nrow = 4) # pdf dim 7 x 11
+                                 nrow = 1) # pdf dim 5 x 12 #nrow = 4 for all figures
 
 consolvssingle.plots.adu <- lapply(unique.adult.sero, function(x) {plot.posteriors(df = inv.adult.consol, serotype = x, agegroup = "adults")})
 
@@ -840,6 +898,67 @@ consol.vs.single.adu <- grid.arrange(#consolvssingle.plots.adu[[1]], consolvssin
                                  consolvssingle.plots[[33]],
                                  
                                  nrow = 4) # pdf dim 7 x 11
+
+
+#### Comparison pre vs post vaccination --------------------------------------------------------------------------------------------------------------------
+
+Atlantaprevspost <- abs.tot[grepl('^Atlanta', abs.tot$DS),]
+Atlantaprevspost$DS <- factor(Atlantaprevspost$DS, levels = c("Atlanta.pre.PCV", "Atlanta.post.PCV7"))
+Atlantaplot <- ggplot(Atlantaprevspost) + 
+  geom_point(aes(x = Serotype, y = invasiveness, colour = DS), position = position_dodge(width = 0.5)) + 
+  geom_errorbar(aes(x = Serotype, ymin = invasiveness.low, ymax = invasiveness.high, width = 0.01, colour = DS), position = position_dodge(width = 0.5)) + 
+  scale_y_continuous(trans = 'log10') + 
+ theme_minimal() + theme_bw() + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  labs(y = "", title = "Atlanta pre- and post-PCV7", colour = "Dataset")
+
+Franceprevspost <- abs.tot[grepl('^France', abs.tot$DS),]
+Franceprevspost$DS <- factor(Franceprevspost$DS, levels = c("France.post.PCV7", "France.post.PCV13"))
+Franceplot <- ggplot(Franceprevspost) + 
+  geom_point(aes(x = Serotype, y = invasiveness, colour = DS), position = position_dodge(width = 0.5)) + 
+  geom_errorbar(aes(x = Serotype, ymin = invasiveness.low, ymax = invasiveness.high, width = 0.01, colour = DS), position = position_dodge(width = 0.5)) + 
+  scale_y_continuous(trans = 'log10') + 
+  theme_minimal() + theme_bw() + theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  
+  labs(y = "", title = "France pre- and post-PCV13", colour = "Dataset")
+
+Bogotaprevspost <- abs.tot[grepl('^Bogota', abs.tot$DS),]
+Bogotaprevspost$DS <- factor(Bogotaprevspost$DS, levels = c("Bogota.pre.PCV", "Bogota.post.PCV7"))
+Bogotaplot <- ggplot(Bogotaprevspost) + 
+  geom_point(aes(x = Serotype, y = invasiveness, colour = DS), position = position_dodge(width = 0.5)) + 
+  geom_errorbar(aes(x = Serotype, ymin = invasiveness.low, ymax = invasiveness.high, width = 0.01, colour = DS), position = position_dodge(width = 0.5)) + 
+  scale_y_continuous(trans = 'log10') + 
+   theme_minimal() + theme_bw() + theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(y = "Invasiveness (case/carrier-yr)", title = "Bogota pre- and post-PC7", colour = "Dataset")
+
+
+pdf("Q:/Technical/R/Case-to-carrier/Figures for paper/Fig 5 - Pre vs Post PCV/Fig5 - prevspost_DS.pdf", width = 12, height = 7)
+grid.arrange(Atlantaplot, Bogotaplot, Franceplot, nrow = 3) # pdf dim 8 x 16
+dev.off()
+
+
+#### Comparison children vs adults in each setting ---------------------------------------------------------------------------------------------------------
+
+uniqueDS <- unique(abs.tot$DS)
+
+childrenvsadults_perDS <- function(df) {
+  df$agegrp <- factor(df$agegrp, levels = c("children", "adults"))
+  ggplot(df) + 
+    geom_point(aes(x = Serotype, y = invasiveness, colour = agegrp), position = position_dodge(width = 0.5)) + 
+    geom_errorbar(aes(x = Serotype, ymin = invasiveness.low, ymax = invasiveness.high, width = 0.1, colour = agegrp), position = position_dodge(width = 0.5)) +
+    labs(title = unique(df$DS), x = "Serotype", y = "Invasiveness (case per carrier yr)", colour = "Age group") + theme_minimal() + theme_bw() + 
+    scale_y_continuous(trans = 'log10') + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+}
+
+childrenvsadults_perDS_plots <- lapply(uniqueDS, function(x) childrenvsadults_perDS(abs.tot %>% filter(DS == x)))
+
+mypath.childvsadultsperDS.inv <- file.path("Q:","Technical","R","Case-to-carrier", "childrenvsadultsperDS.pdf", sep="")
+pdf(mypath.childvsadultsperDS.inv, width = 15, height = 5)
+print(childrenvsadults_perDS_plots)
+dev.off()
+
+childrenadultlegend <- g_legend(childrenvsadults_perDS_plots[[1]] + theme(legend.position = "bottom"))
+grid.arrange(childrenvsadults_perDS_plots[[1]]+theme(legend.position = "none"), childrenvsadults_perDS_plots[[13]]+theme(legend.position = "none"),
+             childrenvsadults_perDS_plots[[12]]+theme(legend.position = "none"), childrenvsadults_perDS_plots[[10]]+theme(legend.position = "none"), 
+             bottom = childrenadultlegend, nrow = 2) # pdf 6 x 20
 
 #### Model Comparison: Bayes Factor  -----------------------------------------------------------------------------------------------------------------------
 
@@ -858,36 +977,11 @@ consol_evidence <- function(df) {
   return(exp(totalLL))
 }
 
+# serotype 4 consolidated evidence
 consol_ev_allDS <- consol_evidence(inv.child.consol %>% filter(Serotype == "4"))
 consol_ev <- mean(consol_ev_allDS)
-
 consol_EW_4 <- consol_evidence(inv.child.consol %>% filter(Serotype == "4") %>% filter(DS == "E.W.pre.PCV"))
 consol_ev_EW4 <- mean(consol_EW_4)
-
-calc_invas <- function(df) { # function that returns a single invasiveness with credible intervals for a serotype
-  # given all the datasets that contain it
-  invas <- 
-    #seq(0.00000001, 0.001, # children pre and postPCV; adults
-    #seq(0.00000001, 0.002, # children prePCV sero 14, 27;
-    # children postPCV sero 4, 8, 10B, 33F, 38, 24F, 18C, 18A, 3, 14
-    seq(0.00000001, 0.02, #0.01, # children prePCV sero 4, 7F, 18B, 13, 31, 12F; 
-        # adults sero 1, 4, 8, 20, 24F, 17F, 35A; 
-        # children postPCV sero 5, 7F, 12F, 25A, 12B
-        #seq(0.00000001, 0.1, #children prePCV sero 1, 5
-        #seq(0.00000001, 0.04, # children postPCV sero 1
-        length.out = 2000)
-  likelihood <- sapply(invas, function(s) overall_inv_2(df, s))
-  #plot(invas, LL, main = df$Serotype[1])
-  
-  Serotype <- as.character(unique(df$Serotype))
-  
-  # Weinberger prior
-  #if (Serotype %in% inv_priors_df$st) {
-  #  prior_invas <- dlnorm(invas, meanlog = inv_priors_df$log.inv.age1[which(inv_priors_df$st == Serotype)]-log(1000), 
-  #                               sdlog = inv_priors_df$stddev[which(inv_priors_df$st == Serotype)])
-  #} else {
-  prior_invas <- dunif(invas, min = 0.00001, max = 0.5)
-}
 
 ## function to estimate bayes factor
 bayesfxr <- function(serotype, df, agegroup) {
@@ -904,11 +998,11 @@ bayesfxr <- function(serotype, df, agegroup) {
   consol.distrib$DS <- "consol"
   colnames(consol.distrib) <- colnames(eachdf1[[1]])
   
-  # AUC.consol <- AUC(consol.distrib$bins, consol.distrib$distrib, method = "trapezoid")
-  # AUC.single.each <- sapply(eachdf1, function(x) AUC(x$bins, x$distrib, method = "trapezoid"))
-  # AUC.single.all <- prod(AUC.single.each)
+  AUC.consol <- AUC(consol.distrib$bins, consol.distrib$distrib, method = "trapezoid")
+  #AUC.single.each <- sapply(eachdf1, function(x) AUC(x$bins, x$distrib, method = "trapezoid"))
+  #AUC.single.all <- prod(AUC.single.each)
   
-  AUC.consol <- sum(consol.distrib$distrib)/nrow(consol.distrib)
+  #AUC.consol <- sum(consol.distrib$distrib)/nrow(consol.distrib)
   AUC.single.each <- sapply(eachdf1, function(x) sum(x$distrib)/nrow(x))
   AUC.single.all <- prod(AUC.single.each)
   
@@ -916,7 +1010,8 @@ bayesfxr <- function(serotype, df, agegroup) {
   #bayesfac <- log(AUC.consol)-log(AUC.single)
   #bayesfac <- exp(bayesfac)
   bayesfac <- log(bayesfac)
-  return(bayesfac)
+  BF <- data.frame(bayesfac = bayesfac, consolevid = log(AUC.consol), specificevid = log(AUC.single.all))
+  return(BF)
 }
 
 newbayesfun <- function(serotype, df, DS, agegroup) { # function to compare evidence of consol.inv for one DS vs single inv for one DS
@@ -930,65 +1025,238 @@ newbayesfun <- function(serotype, df, DS, agegroup) { # function to compare evid
   return(bayesfac)
 }
 
+### BF for children 
 sero15BC.distrib.children <- `sero15B/C.distrib.children`
 bayes <- lapply(unique.child.sero, function(x) bayesfxr(serotype = x, df = inv.child.consol, agegroup = "children"))
-bayes.df <- data.frame(serotype = unique.child.sero, bayes.fxr = unlist(bayes), agegroup = "children", nDS = nDS[nDS > 1])
-seroDS.df <- data.frame(serotype = unique(inv.child.consol$Serotype), nDS = nDS[nDS > 1])
-seroDS.df <- seroDS.df[order(seroDS.df$nDS),]
+bayes.df <- bind_rows(bayes)
+bayes.df <- cbind(serotype = unique.child.sero, bayes.df)
+bayes.df <- cbind(bayes.df, nDS = nDS[nDS > 1])
+BFevidence <-  read.csv("c2c_evidence_BF_children.csv")
+BFevidence <- arrange(BFevidence, nDS)
+BFevidence <- arrange(BFevidence, Evidence)
+BFevidence$Evidence <- factor(BFevidence$Evidence, levels = c("Extreme evidence for specific",
+                                                                      "Moderate evidence for specific",
+                                                                      "Moderate evidence for global", 
+                                                                      "Strong evidence for global", "Very strong evidence for global",
+                                                                      "Extreme evidence for global"))
 
+bayeschildren <- ggplot(BFevidence,aes(x = reorder(BFevidence$Serotype, nDS), y = BFevidence$nDS)) + geom_bar(stat = "identity", aes(fill = BFevidence$Evidence)) + 
+  scale_fill_manual(values = c("#006D2C", "#BAE4B3", "#BDD7E7","#6BAED6","#3182BD", "#08519C")) + 
+  theme_minimal() + theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "Serotype", y = "Number of datasets", fill = "Bayes Factor Label", title = "Evidence: Children") # pdf 4x12
+
+### BF for adults
 sero15BC.distrib.adults <- `sero15B/C.distrib.adults`
-bayes.adults <- lapply(unique.adult.sero, function(x) bayesfxr(serotype = x, df = inv.adult.consol, agegroup = "adults")) 
-bayes.adults.df <- data.frame(serotype = unique.adult.sero, bayes.fxr = unlist(bayes.adults), agegroup = "adults", nDS = nDS.adult[nDS.adult > 1])
-seroDS.adults.df <- data.frame(serotype = unique(inv.adult.consol$Serotype), nDS = nDS.adult[nDS.adult > 1])
-seroDS.adults.df <- seroDS.adults.df[order(seroDS.adults.df$nDS),]
+bayes_adu <- lapply(unique.adult.sero, function(x) bayesfxr(serotype = x, df = inv.adult.consol, agegroup = "adults"))
+bayes_adu.df <- bind_rows(bayes_adu)
+bayes_adu.df <- cbind(serotype = unique.adult.sero, bayes_adu.df)
+bayes_adu.df <- cbind(bayes_adu.df, nDS = nDS.adult[nDS.adult > 1])
+BFevidence_adu <-  read.csv("BFevidence_adults.csv")
+BFevidence_adu <- arrange(BFevidence_adu, nDS)
+BFevidence_adu <- arrange(BFevidence_adu, Evidence)
+BFevidence_adu$Evidence <- factor(BFevidence_adu$Evidence, levels = c("Extreme evidence for specific", "Very strong evidence for specific",
+                                                                      "Strong evidence for specific", "Moderate evidence for specific",
+                                                                      "Anecdotal evidence for specific", 
+                                                                      "Anecdotal evidence for global" , "Moderate evidence for global", 
+                                                                      "Strong evidence for global", "Very strong evidence for global",
+                                                                      "Extreme evidence for global"))
 
-bayesfxr.all <- rbind(melt(bayesfxr.df), melt(bayesfxr.df.adults))
-bayesfxr.all <- bayesfxr.all[!is.na(bayesfxr.all$value),]
-colnames(bayesfxr.all) <- c("agegroup", "serotype", "bayes.fxr")
-write.csv(bayesfxr.all, "bayesfactor.csv")
+bayesadults <- ggplot(BFevidence_adu,aes(x = reorder(BFevidence_adu$serotype, BFevidence_adu$nDS), y = BFevidence_adu$nDS)) + 
+  geom_bar(stat = "identity", aes(fill = BFevidence_adu$Evidence)) + 
+  scale_fill_manual(values = c("#006D2C", "#31A354", "#74C476", "#BAE4B3", "#EDF8E9", "#EFF3FF", "#BDD7E7", "#6BAED6", "#3182BD", "#08519C")) + 
+  theme_minimal() + theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "Serotype", y = "Number of datasets", fill = "Bayes Factor Label", title = "Evidence: Adults") # pdf 4 x 12
 
-# bayes.conditions <- function(bf){
-# if (bf == 1) {"No evidence"
-# } else if (bf > 1 && bf < 3) {"Consolidated: anecdotal evidence"
-# } else if (bf > 3 && bf < 10) {"Consolidated: moderate evidence"
-# } else if (bf > 10 && bf < 30) {"Consolidated: strong evidence"
-# } else if (bf > 30 && bf < 100) {"Consolidated: very strong evidence"
-# } else if (bf > 100) {"Consolidated: moderate evidence"
-# } else if (bf > (1/3) && bf < 1) {"Single: anecdotal evidence"
-# } else if (bf > (1/10) && bf < (1/3)) {"Single: moderate evidence"
-# } else if (bf > (1/30) && bf < (1/10)) {"Single: strong evidence"
-# } else if (bf > (1/100) && bf < (1/30)) {"Single: very strong evidence"
-# } else if (bf < (1/100)) {"Single: extreme evidence"
-# }
-#   return(label)
-# }
+grid.arrange(bayeschildren, bayesadults, nrow = 2) # pdf 7 x 12
+
+#### BAYES FACTOR CHECKING CLOSED FORM SOLUTIONS WITH R AND PYTHON SOLUTIONS ----
+invpri <- 0.5
+numdeviates <- 1000
+
+# serotype 27 specific
+sero27dummy <-  abs.child %>% filter(Serotype == "27", vaccinationera == "pre.PCV")
+nDS27 <- nrow(sero27dummy)
+Q27 <- sero27dummy$N*sero27dummy$time.int
+prod27 <- prod((sero27dummy$n.swab +1)/(sero27dummy$carriage*Q27))
+bayes27 <- log(prod27*(1/invpri^2)) # -15.35229
+# serotype 27 consolidated
+D.27 <- sum(sero27dummy$disease)
+carrdev27 <- lapply(1:nDS27, 
+                    function(x) rbeta(n = numdeviates, shape1 = sero27dummy$carriage[x] + 1, shape2 = sero27dummy$n.swab[x] - sero27dummy$carriage[x] + 1))
+numerator27a <- lapply(1:nDS27, function(x) (Q27[x]*carrdev27[[x]])^sero27dummy$disease[x])
+numerator27b <- numerator27a[[1]]*numerator27a[[2]]+numerator27a[[3]]*numerator27a[[4]]+numerator27a[[5]]*numerator27a[[6]]+numerator27a[[7]]*numerator27a[[8]]+
+  numerator27a[[9]]*numerator27a[[10]]
+
+denom27a <- lapply(1:nDS27, function(x) Q27[x]*carrdev27[[x]])
+denom27b <- (denom27a[[1]] + denom27a[[2]])^(D.27+1)
+
+complicatedpart27 <- sum(numerator27b/denom27b)/numdeviates
+
+consbayes27 <- (1/invpri)*(factorial(D.27)/prod(factorial(sero27dummy$disease)))*complicatedpart27
+
+
+# serotype 23B specific
+sero23Bdummy <-  abs.child %>% filter(Serotype == "23B", vaccinationera == "pre.PCV")
+nDS23B <- nrow(sero23Bdummy)
+Q23B <- sero23Bdummy$N*sero23Bdummy$time.int
+prod23B <- prod((sero23Bdummy$n.swab +1)/(sero23Bdummy$carriage*sero23Bdummy$N*sero23Bdummy$time.int))
+bayes23B <- log(prod23B*(1/invpri^2)) # -18.21582
+# serotype 23B consolidated
+D.23B <- sum(sero23Bdummy$disease)
+carrdev23B <- lapply(1:nDS23B, 
+                    function(x) rbeta(n = numdeviates, shape1 = sero23Bdummy$carriage[x] + 1, shape2 = sero23Bdummy$n.swab[x] - sero23Bdummy$carriage[x] + 1))
+numerator23Ba <- lapply(1:nDS23B, function(x) (Q23B[x]*carrdev23B[[x]])^sero23Bdummy$disease[x])
+numerator23Bb <- numerator23Ba[[1]]*numerator23Ba[[2]]
+
+denom23Ba <- lapply(1:nDS23B, function(x) Q23B[x]*carrdev23B[[x]])
+denom23Bb <- (denom23Ba[[1]] + denom23Ba[[2]])^(D.23B+1)
+
+complicatedpart23B <- sum(numerator23Bb/denom23Bb)/numdeviates
+
+consbayes23B <- (1/invpri)*(factorial(D.23B)/prod(factorial(sero23Bdummy$disease)))*complicatedpart23B
+
+# serotype 6B specific
+sero6Bdummy <- abs.child %>% filter(Serotype == "6B", vaccinationera == "pre.PCV")
+nDS6B <- nrow(sero6Bdummy)
+Q6B <- sero6Bdummy$N*sero6Bdummy$time.int
+prod6B <- prod((sero6Bdummy$n.swab +1)/(sero6Bdummy$carriage*Q6B))
+bayes6B <- log(prod6B*(1/invpri^2)) # -110.7084
+# serotype 6B consolidated
+D.6B <- sum(sero6Bdummy$disease)
+carrdev6B <- lapply(1:nDS6B, 
+                    function(x) rbeta(n = numdeviates, shape1 = sero6Bdummy$carriage[x] + 1, shape2 = sero6Bdummy$n.swab[x] - sero6Bdummy$carriage[x] + 1))
+numerator6Ba <- lapply(1:nDS6B, function(x) sero6Bdummy$disease[x]*log(carrdev6B[[x]]*Q6B))
+numerator6Bb <- numerator6Ba[[1]]+numerator6Ba[[2]]+numerator6Ba[[3]]+numerator6Ba[[4]]+numerator6Ba[[5]]+numerator6Ba[[6]]+numerator6Ba[[7]]+numerator6Ba[[8]]+
+  numerator6Ba[[9]]+numerator6Ba[[10]]
+denom6Ba <- lapply(1:nDS6B, function(x) Q6B[x]*carrdev6B[[x]])
+denom6Bb <- (denom6Ba[[1]] + denom6Ba[[2]]+denom6Ba[[3]] + denom6Ba[[4]]+denom6Ba[[5]] + denom6Ba[[6]]+denom6Ba[[7]] + denom6Ba[[8]]+denom6Ba[[9]] + denom6Ba[[10]])
+denom6Bc <- (D.6B+1)*log(denom6Bb)
+newfrac6B <- exp(numerator6Bb-denom6Bc)
+complicatedpart6B <- sum(newfrac6B)/numdeviates
+D6B.fact <- log(factorialZ(D.6B))
+proddfact6B <- log(prod(as.bigz(factorial(sero6Bdummy$disease))))
+factorialpart6B <- exp(D6B.fact-proddfact6B)
+consbayes6B <- log((1/invpri)*factorialpart6B*complicatedpart6B)
+
+# serotype 6A specific
+sero6Adummy <- abs.child %>% filter(Serotype == "6A", vaccinationera == "pre.PCV")
+nDS6A <- nrow(sero6Adummy)
+Q6A <- sero6Adummy$N*sero6Adummy$time.int
+prod6A <- prod((sero6Adummy$n.swab +1)/(sero6Adummy$carriage*Q6A))
+bayes6A <- log(prod6A*(1/invpri^2)) # -107.6759
+# serotype 6A consolidated
+D.6A <- sum(sero6Adummy$disease)
+carrdev6A <- lapply(1:nDS6A, 
+                    function(x) rbeta(n = numdeviates, shape1 = sero6Adummy$carriage[x] + 1, shape2 = sero6Adummy$n.swab[x] - sero6Adummy$carriage[x] + 1))
+numerator6Aa <- lapply(1:nDS6A, function(x) sero6Adummy$disease[x]*log(carrdev6A[[x]]*Q6A))
+numerator6Ab <- numerator6Aa[[1]]+numerator6Aa[[2]]+numerator6Aa[[3]]+numerator6Aa[[4]]+numerator6Aa[[5]]+numerator6Aa[[6]]+numerator6Aa[[7]]+numerator6Aa[[8]]+
+  numerator6Aa[[9]]+numerator6Aa[[10]]
+denom6Aa <- lapply(1:nDS6A, function(x) Q6A[x]*carrdev6A[[x]])
+denom6Ab <- (denom6Aa[[1]] + denom6Aa[[2]]+denom6Aa[[3]] + denom6Aa[[4]]+denom6Aa[[5]] + denom6Aa[[6]]+denom6Aa[[7]] + denom6Aa[[8]]+denom6Aa[[9]] + denom6Aa[[10]])
+denom6Ac <- (D.6A+1)*log(denom6Ab)
+newfrac6A <- exp(numerator6Ab-denom6Ac)
+complicatedpart6A <- sum(newfrac6A)/numdeviates
+D6A.fact <- log(factorialZ(D.6A))
+proddfact6A <- log(prod(as.bigz(factorial(sero6Adummy$disease))))
+factorialpart6A <- exp(D6A.fact-proddfact6A)
+consbayes6A <- log((1/invpri)*factorialpart6A*complicatedpart6A) # 119.3598
+
+# serotype 14 specific
+sero14dummy <- abs.child %>% filter(Serotype == "14", vaccinationera == "pre.PCV")
+nDS14 <- nrow(sero14dummy)
+Q14 <- sero14dummy$N*sero14dummy$time.int
+prod14 <- prod((sero14dummy$n.swab +1)/(sero14dummy$carriage*Q14))
+bayes14 <- log(prod14*(1/invpri^2)) # -110.7084
+# serotype 14 consolidated
+D.14 <- sum(sero14dummy$disease)
+carrdev14 <- lapply(1:nDS14, 
+                    function(x) rbeta(n = numdeviates, shape1 = sero14dummy$carriage[x] + 1, shape2 = sero14dummy$n.swab[x] - sero14dummy$carriage[x] + 1))
+numerator14a <- lapply(1:nDS14, function(x) sero14dummy$disease[x]*log(carrdev14[[x]]*Q14))
+numerator14b <- numerator14a[[1]]+numerator14a[[2]]+numerator14a[[3]]+numerator14a[[4]]+numerator14a[[5]]+numerator14a[[6]]+numerator14a[[7]]+numerator14a[[8]]+
+  numerator14a[[9]]+numerator14a[[10]]+numerator14a[[11]]
+denom14a <- lapply(1:nDS14, function(x) Q14[x]*carrdev14[[x]])
+denom14b <- (denom14a[[1]] + denom14a[[2]]+denom14a[[3]] + denom14a[[4]]+denom14a[[5]] + denom14a[[6]]+denom14a[[7]] + denom14a[[8]]+denom14a[[9]] + denom14a[[10]] + 
+  denom14a[[11]])
+denom14c <- (D.14+1)*log(denom14b)
+newfrac14 <- exp(numerator14b-denom14c)
+complicatedpart14 <- sum(newfrac14)/numdeviates
+D14.fact <- log(factorialZ(D.14))
+proddfact14 <- log(prod(as.bigz(factorial(sero14dummy$disease))))
+factorialpart14 <- exp(D14.fact-proddfact14)
+consbayes14 <- log((1/invpri)*factorialpart14*complicatedpart14)
+
+# serotype 9V specific ## CARRIAGE = 0 so closed form solution not possible
+sero9Vdummy <- abs.child %>% filter(Serotype == "9V", vaccinationera == "pre.PCV")
+nDS9V <- nrow(sero9Vdummy)
+Q9V <- sero9Vdummy$N*sero9Vdummy$time.int
+prod9V <- prod((sero9Vdummy$n.swab +1)/(sero9Vdummy$carriage*Q9V))
+bayes9V <- log(prod9V*(1/invpri^2)) # -110.7084
+# serotype 9V consolidated
+D.9V <- sum(sero9Vdummy$disease)
+carrdev9V <- lapply(1:nDS9V, 
+                    function(x) rbeta(n = numdeviates, shape1 = sero9Vdummy$carriage[x] + 1, shape2 = sero9Vdummy$n.swab[x] - sero9Vdummy$carriage[x] + 1))
+numerator9Va <- lapply(1:nDS9V, function(x) sero9Vdummy$disease[x]*log(carrdev9V[[x]]*Q9V))
+numerator9Vb <- numerator9Va[[1]]+numerator9Va[[2]]+numerator9Va[[3]]+numerator9Va[[4]]+numerator9Va[[5]]+numerator9Va[[6]]+numerator9Va[[7]]+numerator9Va[[8]]+
+  numerator9Va[[9]]+numerator9Va[[10]]
+denom9Va <- lapply(1:nDS9V, function(x) Q9V[x]*carrdev9V[[x]])
+denom9Vb <- (denom9Va[[1]] + denom9Va[[2]]+denom9Va[[3]] + denom9Va[[4]]+denom9Va[[5]] + denom9Va[[6]]+denom9Va[[7]] + denom9Va[[8]]+denom9Va[[9]] + denom9Va[[10]])
+denom9Vc <- (D.9V+1)*log(denom9Vb)
+newfrac9V <- exp(numerator9Vb-denom9Vc)
+complicatedpart9V <- sum(newfrac9V)/numdeviates
+D9V.fact <- log(factorialZ(D.9V))
+proddfact9V <- log(prod(as.bigz(factorial(sero9Vdummy$disease))))
+factorialpart9V <- exp(D9V.fact-proddfact9V)
+consbayes9V <- log((1/invpri)*factorialpart9V*complicatedpart9V)
+
+
+# serotype 22F specific
+sero22Fdummy <-  abs.child %>% filter(Serotype == "22F", vaccinationera == "pre.PCV")
+nDS22F <- nrow(sero22Fdummy)
+Q22F <- sero22Fdummy$N*sero22Fdummy$time.int
+prod22F <- prod((sero22Fdummy$n.swab +1)/(sero22Fdummy$carriage*sero22Fdummy$N*sero22Fdummy$time.int))
+bayes22F <- log(prod22F*(1/invpri^2)) # -18.21582
+# serotype 22F consolidated - NOT POSSIBLE BECAUSE CARRIAGE = 0 FOR ONE OF THE DS
+D.22F <- sum(sero22Fdummy$disease)
+carrdev22F <- lapply(1:nDS22F, 
+                     function(x) rbeta(n = numdeviates, shape1 = sero22Fdummy$carriage[x] + 1, shape2 = sero22Fdummy$n.swab[x] - sero22Fdummy$carriage[x] + 1))
+numerator22Fa <- lapply(1:nDS22F, function(x) (Q22F[x]*carrdev22F[[x]])^sero22Fdummy$disease[x])
+numerator22Fb <- numerator22Fa[[1]]*numerator22Fa[[2]]*numerator22Fa[[3]]
+
+denom22Fa <- lapply(1:nDS22F, function(x) Q22F[x]*carrdev22F[[x]])
+denom22Fb <- (denom22Fa[[1]] + denom22Fa[[2]]+denom22Fa[[3]])^(D.22F+1)
+
+complicatedpart22F <- sum(numerator22Fb/denom22Fb)/numdeviates
+
+consbayes22F <- (1/invpri)*(factorial(D.22F)/prod(factorial(sero22Fdummy$disease)))*complicatedpart22F
+
+
+# #### testing bayes fxr
+# testdata <- child.abs.ds %>% filter(Serotype == "6A") %>% filter(DS == "Bogota.pre.PCV")
+# test <- invasiveness(testdata)
+# BF.df <- bayesfxr.df[(order(bayesfxr.df$invas_dev)),]
+# sumlike <- (sum(BF.df$posterior_samp))/nrow(BF.df) # 1.481264e-05
+# AUC.test <- AUC(invas_dev, posterior_samp, method = "trapezoid") # 7.180451e-06
 # 
-# bayesfxr.all$label <- sapply(bayesfxr.all$bayes.fxr, function(x) bayes.conditions(x))
+# testdata2 <- child.abs.ds %>% filter(Serotype == "6B") %>% filter(DS == "Bogota.pre.PCV")
+# test2 <- invasiveness(testdata2)
+# BF.df <- bayesfxr.df[(order(bayesfxr.df$invas_dev)),]
+# sumlike <- (sum(BF.df$posterior_samp))/nrow(BF.df) # 1.691704e-05
+# AUC.test <- AUC(BF.df$invas_dev, BF.df$posterior_samp, method = "trapezoid") # 1.024761e-05
+# 
+# testdata3 <- child.abs.ds %>% filter(Serotype == "6A") %>% filter(DS == "Atlanta.pre.PCV")
+# test3 <- invasiveness(testdata3)
+# BF.df <- bayesfxr.df[(order(bayesfxr.df$invas_dev)),]
+# sumlike <- (sum(BF.df$posterior_samp))/nrow(BF.df) # 0.0001593778
+# AUC.test <- AUC(BF.df$invas_dev, BF.df$posterior_samp, method = "trapezoid") # 6.824021e-05
+# 
+# testdata4 <- child.abs.ds %>% filter(Serotype == "6A") %>% filter(DS == "Atlanta.pre.PCV")
+# test4 <- invasiveness(testdata4)
+# BF.df <- bayesfxr.df[(order(bayesfxr.df$invas_dev)),]
+# sumlike <- (sum(BF.df$posterior_samp))/nrow(BF.df) # 0.0001593778
+# AUC.test <- AUC(BF.df$invas_dev, BF.df$posterior_samp, method = "trapezoid") # 6.824021e-05
 
-#### testing bayes fxr
-testdata <- child.abs.ds %>% filter(Serotype == "6A") %>% filter(DS == "Bogota.pre.PCV")
-test <- invasiveness(testdata)
-BF.df <- bayesfxr.df[(order(bayesfxr.df$invas_dev)),]
-sumlike <- (sum(BF.df$posterior_samp))/nrow(BF.df) # 1.481264e-05
-AUC.test <- AUC(invas_dev, posterior_samp, method = "trapezoid") # 7.180451e-06
-
-testdata2 <- child.abs.ds %>% filter(Serotype == "6B") %>% filter(DS == "Bogota.pre.PCV")
-test2 <- invasiveness(testdata2)
-BF.df <- bayesfxr.df[(order(bayesfxr.df$invas_dev)),]
-sumlike <- (sum(BF.df$posterior_samp))/nrow(BF.df) # 1.691704e-05
-AUC.test <- AUC(BF.df$invas_dev, BF.df$posterior_samp, method = "trapezoid") # 1.024761e-05
-
-testdata3 <- child.abs.ds %>% filter(Serotype == "6A") %>% filter(DS == "Atlanta.pre.PCV")
-test3 <- invasiveness(testdata3)
-BF.df <- bayesfxr.df[(order(bayesfxr.df$invas_dev)),]
-sumlike <- (sum(BF.df$posterior_samp))/nrow(BF.df) # 0.0001593778
-AUC.test <- AUC(BF.df$invas_dev, BF.df$posterior_samp, method = "trapezoid") # 6.824021e-05
-
-testdata4 <- child.abs.ds %>% filter(Serotype == "6A") %>% filter(DS == "Atlanta.pre.PCV")
-test4 <- invasiveness(testdata4)
-BF.df <- bayesfxr.df[(order(bayesfxr.df$invas_dev)),]
-sumlike <- (sum(BF.df$posterior_samp))/nrow(BF.df) # 0.0001593778
-AUC.test <- AUC(BF.df$invas_dev, BF.df$posterior_samp, method = "trapezoid") # 6.824021e-05
 
 #### GPSC data ---------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -1008,10 +1276,11 @@ new.child.comb <- dplyr::left_join(consol.gpsc, consol.child) %>% drop_na()
 new.child.comb$Serogroup <- factor(new.child.comb$Serogroup, levels = c("VT7", "VT10", "VT13","NVT")) 
 
 ggplot(new.child.comb) + # pdf dim 5 x 10
+  geom_errorbar(aes(x = no.strains, ymin = overall.invasiveness.low, ymax = overall.invasiveness.high), width = 0.2) +
   geom_point(aes(x = no.strains, y = overall.invasiveness, color = Serogroup, group = Serogroup), size = 4) + 
   geom_text(aes(x = no.strains, y = overall.invasiveness, label = Serotype), size = 2, color = "white", fontface = "bold") +
-  scale_color_manual(values= cols) +
-  labs(x = "Number of strains", y = "Overall Invasiveness")
+  scale_color_manual(values= cols) + scale_y_continuous(trans = 'log10') +
+  labs(x = "Number of strains", y = "Global Invasiveness", colour = "Serotype category") + theme_minimal()
   #stat_ellipse(aes(x = no.strains, y = overall.invasiveness, color = Serogroup, group = Serogroup, type = "norm"))
 
 # adult age group
@@ -1019,11 +1288,32 @@ new.adult.comb <- dplyr::left_join(consol.gpsc, consol.adult) %>% drop_na()
 new.adult.comb$Serogroup <- factor(new.adult.comb$Serogroup, levels = c("VT7", "VT10", "VT13","NVT")) 
 
 ggplot(new.adult.comb) +# pdf dim 5 x 10
+  geom_errorbar(aes(x = no.strains, ymin = overall.invasiveness.low, ymax = overall.invasiveness.high), width = 0.2) +
   geom_point(aes(x = no.strains, y = overall.invasiveness, color = Serogroup, group = Serogroup), size = 4) + 
   geom_text(aes(x = no.strains, y = overall.invasiveness, label = Serotype), size = 2.2, color = "white", fontface = "bold") +
-  scale_color_manual(values= cols) +
-  labs(x = "Number of strains", y = "Overall Invasiveness")
+  scale_color_manual(values= cols) + scale_y_continuous(trans = 'log10') +
+  labs(x = "Number of strains", y = "Global Invasiveness", colour = "Serotype category") + theme_minimal()
 #stat_ellipse(aes(x = no.strains, y = overall.invasiveness, color = Serogroup, group = Serogroup, type = "norm"))
+
+# CALC GPSC SDI and plot vs invasiveness
+# requires import of calc_SimpsDiv from serotype replacement file
+GPSC_data <-  read_excel("GPSC_serotype_data.xlsx")
+colnames(GPSC_data) <- c("laneID", "Serotype", "GPSC")
+GPSC_data$laneID <- NULL
+GPSC_div <- map(gpsc.unique.sero, function(x) calc_SimpsDiv((GPSC_data %>% filter(Serotype == x) %>% group_by(GPSC) %>% tally())$n))
+GPSC_div_allsero <- do.call("rbind", GPSC_div)
+GPSC_div_allsero <- data.frame(cbind(gpsc.unique.sero, GPSC_div_allsero)) %>% drop_na() # NaNs result from serotypes that only had 1 laneID
+colnames(GPSC_div_allsero) <- c("Serotype", "SDI", "SDI_low", "SDI_high", "SDI_var")
+new_child_GPSC_div <- left_join(GPSC_div_allsero, consol.child) %>% drop_na()
+new_child_GPSC_div$Serogroup <- factor(new_child_GPSC_div$Serogroup, levels = c("VT7", "VT10", "VT13","NVT")) 
+
+ggplot(new_child_GPSC_div) + # pdf dim 5 x 10
+  geom_point(aes(x = SDI, y = overall.invasiveness, color = Serogroup, group = Serogroup), size = 4) + 
+  geom_text(aes(x = SDI, y = overall.invasiveness, label = Serotype), size = 2, color = "white", fontface = "bold") +
+  geom_errorbar(aes(x = SDI, ymin = overall.invasiveness.low, ymax = overall.invasiveness.high), width = 0.0001) +
+  geom_errorbarh(aes(y = overall.invasiveness, xmin = SDI_low, xmax = SDI_high), height = 0.001)
+  scale_color_manual(values= cols) +
+  labs(x = "Simpson's Diversity Index", y = "Global Invasiveness")
 
 #### --------------------------NOT USED/COMMENTED OUT-------------------------------------------------------------------------------------------------------
 
